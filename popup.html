@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Colorblind Fixer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Colorblind Fixer</h2>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="preset">Preset Filters</button>
+      <button class="tab-btn" data-tab="custom">Custom Colors</button>
+    </div>
+
+    <div id="preset-tab" class="tab-content active">
+      <select id="colorblindType">
+        <option value="protanopia">Protanopia (Red-Blind)</option>
+        <option value="protanomaly">Protanomaly (Red-Weak)</option>
+        <option value="deuteranopia">Deuteranopia (Green-Blind)</option>
+        <option value="deuteranomaly">Deuteranomaly (Green-Weak)</option>
+        <option value="tritanopia">Tritanopia (Blue-Blind)</option>
+        <option value="tritanomaly">Tritanomaly (Blue-Weak)</option>
+        <option value="achromatopsia">Achromatopsia (Complete)</option>
+        <option value="achromatomaly">Achromatomaly (Partial)</option>
+        <optgroup label="Combined Color Blindness">
+          <option value="proto_deuter">Protanopia + Deuteranopia</option>
+          <option value="deuter_trit">Deuteranopia + Tritanopia</option>
+          <option value="proto_trit">Protanopia + Tritanopia</option>
+          <option value="full_combo">All Three Types</option>
+        </optgroup>
+      </select>
+      <button id="applyFilter">Apply Filter</button>
+      <button id="resetFilter">Reset</button>
+    </div>
+
+    <div id="custom-tab" class="tab-content">
+      <div class="color-mapping">
+        <div class="color-pair">
+          <label>Replace color:</label>
+          <input type="color" class="from-color" value="#FF0000">
+          <label>With:</label>
+          <input type="color" class="to-color" value="#00FF00">
+          <button class="remove-pair">×</button>
+        </div>
+      </div>
+      <button id="addColorPair">+ Add Color Mapping</button>
+      <button id="applyCustom">Apply Custom Colors</button>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
