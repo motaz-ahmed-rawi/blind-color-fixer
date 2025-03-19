@@ -1,3 +1,61 @@
+// Add logger utility at the top
+const Logger = {
+    debug: (msg, ...args) => console.debug(`[ColorblindFixer] ${msg}`, ...args),
+    error: (msg, ...args) => console.error(`[ColorblindFixer] ${msg}`, ...args)
+};
+
+let isExtensionEnabled = true;
+
+function removeAllFilters() {
+    // Remove SVG filters
+    const customSvg = document.querySelector('#custom-color-svg');
+    if (customSvg) customSvg.remove();
+    
+    // Remove filter SVG elements
+    const filterSvg = document.querySelector('svg[style="display:none"]');
+    if (filterSvg) filterSvg.remove();
+    
+    // Remove filter from body
+    document.body.style.transition = 'filter 0.3s ease-in-out';
+    document.body.style.filter = 'none';
+}
+
+// Update initial state check
+chrome.storage.local.get(['isEnabled', 'lastFilter', 'lastCustomColors'], function(result) {
+    isExtensionEnabled = result.isEnabled !== false;
+    
+    if (isExtensionEnabled) {
+        if (result.lastFilter) {
+            applyColorFilter(result.lastFilter);
+        } else if (result.lastCustomColors) {
+            applyCustomColors(result.lastCustomColors);
+        }
+    } else {
+        removeAllFilters();
+    }
+});
+
+// Listen for toggle changes
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+    if (request.action === 'toggleExtension') {
+        isExtensionEnabled = request.isEnabled;
+        if (isExtensionEnabled) {
+            applyColorCorrection();
+        } else {
+            removeColorCorrection();
+        }
+    }
+});
+
+function applyColorCorrection() {
+    // ...existing color correction code...
+}
+
+function removeColorCorrection() {
+    // Remove any applied filters or color corrections
+    document.documentElement.style.filter = 'none';
+}
+
 function applyColorFilter(type) {
     const filters = {
         'protanopia': 'url("#protanopia-filter")',
@@ -92,79 +150,90 @@ function applyColorFilter(type) {
 }
 
 function applyCustomColors(colorPairs) {
-    const oldSvg = document.querySelector('#custom-color-svg');
-    if (oldSvg) oldSvg.remove();
+    try {
+        if (!Array.isArray(colorPairs) || !colorPairs.length) {
+            throw new Error('Invalid color pairs provided');
+        }
 
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.id = 'custom-color-svg';
-    svg.style.display = 'none';
+        const oldSvg = document.querySelector('#custom-color-svg');
+        if (oldSvg) oldSvg.remove();
 
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
-    filter.id = 'custom-filter';
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.id = 'custom-color-svg';
+        svg.style.display = 'none';
 
-    // Add a color matrix for overall adjustment
-    const baseMatrix = document.createElementNS('http://www.w3.org/2000/svg', 'feColorMatrix');
-    baseMatrix.setAttribute('type', 'matrix');
-    baseMatrix.setAttribute('result', 'original');
-    baseMatrix.setAttribute('values', '1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0');
-    filter.appendChild(baseMatrix);
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+        filter.id = 'custom-filter';
 
-    colorPairs.forEach((pair, index) => {
-        const fromColor = hexToRgb(pair.from);
-        const toColor = hexToRgb(pair.to);
+        // Create lookup table for better performance
+        const lookupTable = new Map();
+        colorPairs.forEach(pair => {
+            const fromRgb = hexToRgb(pair.from);
+            const toRgb = hexToRgb(pair.to);
+            lookupTable.set(pair.from, {
+                matrix: calculateColorMatrix(fromRgb, toRgb),
+                threshold: 0.1
+            });
+        });
 
-        // Create color detection matrix
-        const detectMatrix = document.createElementNS('http://www.w3.org/2000/svg', 'feColorMatrix');
-        detectMatrix.setAttribute('in', index === 0 ? 'SourceGraphic' : `color${index - 1}`);
-        detectMatrix.setAttribute('type', 'matrix');
-        detectMatrix.setAttribute('values', `
-            ${fromColor.r/255} 0 0 0 0
-            0 ${fromColor.g/255} 0 0 0
-            0 0 ${fromColor.b/255} 0 0
-            0 0 0 1 0
-        `);
-        detectMatrix.setAttribute('result', `detect${index}`);
+        // Add color adjustment filters
+        colorPairs.forEach((pair, index) => {
+            const { matrix } = lookupTable.get(pair.from);
+            
+            const colorMatrix = document.createElementNS('http://www.w3.org/2000/svg', 'feColorMatrix');
+            colorMatrix.setAttribute('type', 'matrix');
+            colorMatrix.setAttribute('values', matrix.join(' '));
+            colorMatrix.setAttribute('result', `color${index}`);
 
-        // Create replacement matrix
-        const replaceMatrix = document.createElementNS('http://www.w3.org/2000/svg', 'feColorMatrix');
-        replaceMatrix.setAttribute('type', 'matrix');
-        replaceMatrix.setAttribute('values', `
-            ${toColor.r/fromColor.r} 0 0 0 0
-            0 ${toColor.g/fromColor.g} 0 0 0
-            0 0 ${toColor.b/fromColor.b} 0 0
-            0 0 0 1 0
-        `);
-        replaceMatrix.setAttribute('result', `replace${index}`);
+            // Add gaussian blur for smoother transitions
+            const blur = document.createElementNS('http://www.w3.org/2000/svg', 'feGaussianBlur');
+            blur.setAttribute('stdDeviation', '0.5');
+            blur.setAttribute('result', `blur${index}`);
 
-        // Blend the results
+            filter.appendChild(colorMatrix);
+            filter.appendChild(blur);
+        });
+
+        // Add final composition
         const composite = document.createElementNS('http://www.w3.org/2000/svg', 'feComposite');
-        composite.setAttribute('in', `detect${index}`);
-        composite.setAttribute('in2', `replace${index}`);
         composite.setAttribute('operator', 'arithmetic');
         composite.setAttribute('k1', '0');
         composite.setAttribute('k2', '1');
         composite.setAttribute('k3', '0');
         composite.setAttribute('k4', '0');
-        composite.setAttribute('result', `color${index}`);
 
-        filter.appendChild(detectMatrix);
-        filter.appendChild(replaceMatrix);
         filter.appendChild(composite);
-    });
+        defs.appendChild(filter);
+        svg.appendChild(defs);
+        document.body.appendChild(svg);
 
-    // Add final blend
-    const finalBlend = document.createElementNS('http://www.w3.org/2000/svg', 'feBlend');
-    finalBlend.setAttribute('in', `color${colorPairs.length - 1}`);
-    finalBlend.setAttribute('in2', 'SourceGraphic');
-    finalBlend.setAttribute('mode', 'normal');
-    filter.appendChild(finalBlend);
+        // Apply with transition
+        requestAnimationFrame(() => {
+            document.body.style.transition = 'filter 0.3s ease-in-out';
+            document.body.style.filter = 'url(#custom-filter)';
+        });
 
-    defs.appendChild(filter);
-    svg.appendChild(defs);
-    document.body.appendChild(svg);
+        Logger.debug('Custom colors applied successfully');
+        return true;
+    } catch (error) {
+        Logger.error('Error applying custom colors:', error);
+        return false;
+    }
+}
 
-    document.body.style.filter = 'url(#custom-filter)';
+// Add new helper function for color matrix calculation
+function calculateColorMatrix(fromColor, toColor) {
+    const scaleR = toColor.r / Math.max(fromColor.r, 1);
+    const scaleG = toColor.g / Math.max(fromColor.g, 1);
+    const scaleB = toColor.b / Math.max(fromColor.b, 1);
+
+    return [
+        scaleR, 0, 0, 0, 0,
+        0, scaleG, 0, 0, 0,
+        0, 0, scaleB, 0, 0,
+        0, 0, 0, 1, 0
+    ];
 }
 
 // Helper function to calculate color similarity
@@ -176,25 +245,47 @@ function colorDistance(color1, color2) {
     );
 }
 
-// Add new functions for saving and loading custom colors
+// Improve save function with error handling
 function saveCustomColors(colorPairs) {
-    chrome.storage.sync.set({
-        'savedColorPairs': colorPairs
-    }, function() {
-        console.log('Color pairs saved');
+    return new Promise((resolve, reject) => {
+        try {
+            chrome.storage.sync.set({
+                'savedColorPairs': colorPairs,
+                'timestamp': Date.now()
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                    return;
+                }
+                Logger.debug('Color pairs saved successfully');
+                resolve(true);
+            });
+        } catch (error) {
+            Logger.error('Error saving colors:', error);
+            reject(error);
+        }
     });
 }
 
 function loadCustomColors() {
-    return new Promise((resolve) => {
-        chrome.storage.sync.get('savedColorPairs', function(result) {
-            if (result.savedColorPairs) {
-                applyCustomColors(result.savedColorPairs);
-                resolve(result.savedColorPairs);
-            } else {
-                resolve(null);
-            }
-        });
+    return new Promise((resolve, reject) => {
+        try {
+            chrome.storage.sync.get('savedColorPairs', function(result) {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                    return;
+                }
+                if (result.savedColorPairs) {
+                    applyCustomColors(result.savedColorPairs);
+                    resolve(result.savedColorPairs);
+                } else {
+                    resolve(null);
+                }
+            });
+        } catch (error) {
+            Logger.error('Error loading colors:', error);
+            reject(error);
+        }
     });
 }
 
@@ -210,21 +301,68 @@ function hexToRgb(hex) {
 
 // Update the message listener
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'applyFilter') {
-        applyColorFilter(request.type);
-    } else if (request.action === 'reset') {
-        document.body.style.filter = 'none';
-        const oldSvg = document.querySelector('#custom-color-svg');
-        if (oldSvg) oldSvg.remove();
-    } else if (request.action === 'applyCustomColors') {
-        applyCustomColors(request.colorPairs);
-        // Save the colors when they are applied
-        saveCustomColors(request.colorPairs);
-    } else if (request.action === 'loadSavedColors') {
-        loadCustomColors().then(colorPairs => {
-            sendResponse({ success: true, colorPairs: colorPairs });
-        });
-        return true; // Required for async response
+    try {
+        if (request.action === 'toggleExtension') {
+            isExtensionEnabled = request.isEnabled;
+            if (isExtensionEnabled) {
+                // Restore last used settings
+                chrome.storage.local.get(['lastFilter', 'lastCustomColors'], function(result) {
+                    if (result.lastFilter) {
+                        applyColorFilter(result.lastFilter);
+                    } else if (result.lastCustomColors) {
+                        applyCustomColors(result.lastCustomColors);
+                    }
+                });
+            } else {
+                removeAllFilters();
+            }
+            sendResponse({ success: true });
+            return;
+        }
+
+        // If extension is disabled, don't process any other actions
+        if (!isExtensionEnabled) {
+            sendResponse({ success: false, error: 'Extension is disabled' });
+            return;
+        }
+
+        switch (request.action) {
+            case 'applyFilter':
+                if (isExtensionEnabled) {
+                    applyColorFilter(request.type);
+                }
+                sendResponse({ success: true });
+                break;
+            case 'reset':
+                document.body.style.transition = 'filter 0.3s ease-in-out';
+                document.body.style.filter = 'none';
+                const oldSvg = document.querySelector('#custom-color-svg');
+                if (oldSvg) oldSvg.remove();
+                sendResponse({ success: true });
+                break;
+            case 'applyCustomColors':
+                if (isExtensionEnabled) {
+                    const success = applyCustomColors(request.colorPairs);
+                    if (success) {
+                        saveCustomColors(request.colorPairs)
+                            .then(() => sendResponse({ success: true }))
+                            .catch(error => sendResponse({ success: false, error: error.message }));
+                        return true; // Keep channel open for async response
+                    }
+                    sendResponse({ success: false, error: 'Failed to apply colors' });
+                } else {
+                    sendResponse({ success: false, error: 'Extension is disabled' });
+                }
+                break;
+            case 'loadSavedColors':
+                loadCustomColors()
+                    .then(colorPairs => sendResponse({ success: true, colorPairs }))
+                    .catch(error => sendResponse({ success: false, error: error.message }));
+                return true; // Keep channel open for async response
+        }
+    } catch (error) {
+        Logger.error('Error in message listener:', error);
+        sendResponse({ success: false, error: error.message });
     }
 });
 
