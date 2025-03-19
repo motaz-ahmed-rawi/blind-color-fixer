@@ -20,17 +20,10 @@ function removeAllFilters() {
     document.body.style.filter = 'none';
 }
 
-// Update initial state check
-chrome.storage.local.get(['isEnabled', 'lastFilter', 'lastCustomColors'], function(result) {
+// Check initial state
+chrome.storage.local.get(['isEnabled'], function(result) {
     isExtensionEnabled = result.isEnabled !== false;
-    
-    if (isExtensionEnabled) {
-        if (result.lastFilter) {
-            applyColorFilter(result.lastFilter);
-        } else if (result.lastCustomColors) {
-            applyCustomColors(result.lastCustomColors);
-        }
-    } else {
+    if (!isExtensionEnabled) {
         removeAllFilters();
     }
 });
@@ -304,16 +297,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     try {
         if (request.action === 'toggleExtension') {
             isExtensionEnabled = request.isEnabled;
-            if (isExtensionEnabled) {
-                // Restore last used settings
-                chrome.storage.local.get(['lastFilter', 'lastCustomColors'], function(result) {
-                    if (result.lastFilter) {
-                        applyColorFilter(result.lastFilter);
-                    } else if (result.lastCustomColors) {
-                        applyCustomColors(result.lastCustomColors);
-                    }
-                });
-            } else {
+            if (!isExtensionEnabled) {
                 removeAllFilters();
             }
             sendResponse({ success: true });
